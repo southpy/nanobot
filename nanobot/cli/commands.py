@@ -156,6 +156,8 @@ This file stores important information that should persist across sessions.
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Debug output (more verbose)"),
+    log_file: str = typer.Option("", "--log-file", "-l", help="Log to file"),
 ):
     """Start the nanobot gateway."""
     from nanobot.config.loader import load_config, get_data_dir
@@ -166,11 +168,14 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    
-    if verbose:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-    
+    from nanobot.utils.logging import configure_logging, configure_file_logging
+
+    # Configure logging
+    configure_logging(verbose=verbose, debug=debug)
+
+    if log_file:
+        configure_file_logging(log_file)
+
     console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
     
     config = load_config()
@@ -286,13 +291,23 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
+    verbose: bool = typer.Option(False, "--verbose", help="Verbose output"),
+    debug: bool = typer.Option(False, "--debug", help="Debug output (more verbose)"),
+    log_file: str = typer.Option("", "--log-file", help="Log to file"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
     from nanobot.bus.queue import MessageBus
     from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.agent.loop import AgentLoop
-    
+    from nanobot.utils.logging import configure_logging, configure_file_logging
+
+    # Configure logging
+    configure_logging(verbose=verbose, debug=debug)
+
+    if log_file:
+        configure_file_logging(log_file)
+
     config = load_config()
     
     api_key = config.get_api_key()

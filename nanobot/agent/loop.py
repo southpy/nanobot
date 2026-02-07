@@ -185,16 +185,21 @@ class AgentLoop:
         # Agent loop
         iteration = 0
         final_content = None
-        
+
+        logger.info(f"Starting agent loop for message from {msg.channel}:{msg.sender_id}")
+
         while iteration < self.max_iterations:
             iteration += 1
-            
+            logger.info(f"Agent iteration {iteration}/{self.max_iterations}")
+
             # Call LLM
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model
             )
+
+            logger.info(f"Iteration {iteration} completed - finish_reason: {response.finish_reason}")
             
             # Handle tool calls
             if response.has_tool_calls:
@@ -225,15 +230,19 @@ class AgentLoop:
             else:
                 # No tool calls, we're done
                 final_content = response.content
+                logger.info(f"Agent loop completed after {iteration} iterations")
                 break
-        
+
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-        
+            logger.warning(f"Agent loop reached max iterations ({self.max_iterations}) without final response")
+
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
+
+        logger.info(f"Response ready: {len(final_content)} characters")
         
         return OutboundMessage(
             channel=msg.channel,
