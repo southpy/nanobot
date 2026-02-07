@@ -33,6 +33,10 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
 
+    def update_config(self, config: DiscordConfig) -> None:
+        self.config = config
+        logger.info("Discord channel configuration updated")
+
     async def start(self) -> None:
         """Start the Discord gateway connection."""
         if not self.config.token:
@@ -78,32 +82,45 @@ class DiscordChannel(BaseChannel):
             logger.warning("Discord HTTP client not initialized")
             return
 
+        content = msg.content
+        max_len = self.config.max_message_length or 2000
+
+        messages_to_send = []
+        if self.config.split_messages and len(content) > max_len:
+            for i in range(0, len(content), max_len):
+                messages_to_send.append(content[i : i + max_len])
+        elif self.config.truncate_messages and len(content) > max_len:
+            messages_to_send.append(content[: max_len - 3] + "...")
+        else:
+            messages_to_send.append(content)
+
         url = f"{DISCORD_API_BASE}/channels/{msg.chat_id}/messages"
-        payload: dict[str, Any] = {"content": msg.content}
-
-        if msg.reply_to:
-            payload["message_reference"] = {"message_id": msg.reply_to}
-            payload["allowed_mentions"] = {"replied_user": False}
-
         headers = {"Authorization": f"Bot {self.config.token}"}
 
         try:
-            for attempt in range(3):
-                try:
-                    response = await self._http.post(url, headers=headers, json=payload)
-                    if response.status_code == 429:
-                        data = response.json()
-                        retry_after = float(data.get("retry_after", 1.0))
-                        logger.warning(f"Discord rate limited, retrying in {retry_after}s")
-                        await asyncio.sleep(retry_after)
-                        continue
-                    response.raise_for_status()
-                    return
-                except Exception as e:
-                    if attempt == 2:
-                        logger.error(f"Error sending Discord message: {e}")
-                    else:
-                        await asyncio.sleep(1)
+            for i, text in enumerate(messages_to_send):
+                payload: dict[str, Any] = {"content": text}
+
+                if msg.reply_to and i == 0:
+                    payload["message_reference"] = {"message_id": msg.reply_to}
+                    payload["allowed_mentions"] = {"replied_user": False}
+
+                for attempt in range(3):
+                    try:
+                        response = await self._http.post(url, headers=headers, json=payload)
+                        if response.status_code == 429:
+                            data = response.json()
+                            retry_after = float(data.get("retry_after", 1.0))
+                            logger.warning(f"Discord rate limited, retrying in {retry_after}s")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        response.raise_for_status()
+                        break
+                    except Exception as e:
+                        if attempt == 2:
+                            logger.error(f"Error sending Discord message segment {i}: {e}")
+                        else:
+                            await asyncio.sleep(1)
         finally:
             await self._stop_typing(msg.chat_id)
 
@@ -212,7 +229,9 @@ class DiscordChannel(BaseChannel):
                 continue
             try:
                 media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                file_path = (
+                    media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
+                )
                 resp = await self._http.get(url)
                 resp.raise_for_status()
                 file_path.write_bytes(resp.content)
