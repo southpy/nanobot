@@ -45,6 +45,8 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
@@ -58,6 +60,8 @@ class AgentLoop:
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
+        self.max_tokens = max_tokens
+        self.temperature = temperature
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -149,6 +153,8 @@ class AgentLoop:
     def update_config(self, config: Any) -> None:
         self.model = config.agents.defaults.model
         self.max_iterations = config.agents.defaults.max_tool_iterations
+        self.max_tokens = config.agents.defaults.max_tokens
+        self.temperature = config.agents.defaults.temperature
         self.brave_api_key = config.tools.web.search.api_key or None
         self.exec_config = config.tools.exec
         self.restrict_to_workspace = config.tools.restrict_to_workspace
@@ -232,7 +238,11 @@ class AgentLoop:
 
             # Call LLM
             response = await self.provider.chat(
-                messages=messages, tools=self.tools.get_definitions(), model=self.model
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
             )
 
             logger.info(
