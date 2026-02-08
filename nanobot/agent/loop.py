@@ -3,13 +3,9 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from loguru import logger
-
-if TYPE_CHECKING:
-    from nanobot.config.schema import ExecToolConfig, Config
-    from nanobot.cron.service import CronService
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -45,12 +41,11 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
+        session_manager: SessionManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
@@ -60,15 +55,13 @@ class AgentLoop:
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
-        self.max_tokens = max_tokens
-        self.temperature = temperature
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
-        self.sessions = SessionManager(workspace)
+        self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -199,7 +192,8 @@ class AgentLoop:
         if msg.channel == "system":
             return await self._process_system_message(msg)
 
-        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}")
+        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
 
         # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
@@ -230,23 +224,12 @@ class AgentLoop:
         iteration = 0
         final_content = None
 
-        logger.info(f"Starting agent loop for message from {msg.channel}:{msg.sender_id}")
-
         while iteration < self.max_iterations:
             iteration += 1
-            logger.info(f"Agent iteration {iteration}/{self.max_iterations}")
 
             # Call LLM
             response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-            )
-
-            logger.info(
-                f"Iteration {iteration} completed - finish_reason: {response.finish_reason}"
+                messages=messages, tools=self.tools.get_definitions(), model=self.model
             )
 
             # Handle tool calls
@@ -269,8 +252,8 @@ class AgentLoop:
 
                 # Execute tools
                 for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments)
-                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
@@ -278,21 +261,19 @@ class AgentLoop:
             else:
                 # No tool calls, we're done
                 final_content = response.content
-                logger.info(f"Agent loop completed after {iteration} iterations")
                 break
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
-            logger.warning(
-                f"Agent loop reached max iterations ({self.max_iterations}) without final response"
-            )
+
+        # Log response preview
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
 
         # Save to session
         session.add_message("user", msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
-
-        logger.info(f"Response ready: {len(final_content)} characters")
 
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
 
@@ -365,8 +346,8 @@ class AgentLoop:
                 )
 
                 for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments)
-                    logger.debug(f"Executing tool: {tool_call.name} with arguments: {args_str}")
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
