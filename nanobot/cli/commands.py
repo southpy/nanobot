@@ -26,7 +26,7 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
+    version: bool = typer.Option(None, "--version", "-V", callback=version_callback, is_eager=True),
 ):
     """nanobot - Personal AI Assistant."""
     pass
@@ -312,9 +312,9 @@ def gateway(
 def agent(
     message: str = typer.Option(None, "--message", "-m", help="Message to send to the agent"),
     session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
-    verbose: bool = typer.Option(False, "--verbose", help="Verbose output"),
-    debug: bool = typer.Option(False, "--debug", help="Debug output (more verbose)"),
-    log_file: str = typer.Option("", "--log-file", help="Log to file"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    debug: bool = typer.Option(False, "--debug", "-d", help="Debug output (more verbose)"),
+    log_file: str = typer.Option("", "--log-file", "-l", help="Log to file"),
 ):
     """Interact with the agent directly."""
     from nanobot.config.loader import load_config
